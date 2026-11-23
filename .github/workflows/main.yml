@@ -1,0 +1,44 @@
+name: Weekly Notion Meeting Action Items Sync
+
+on:
+  # 매주 월요일 오후 19:00 KST (한국 시간 기준)
+  schedule:
+    - cron: '0 10 * * 1'
+  
+  # 언제든 수동으로 즉시 실행 가능
+  workflow_dispatch:
+
+jobs:
+  sync-tasks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Notion Sync Script
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_SOURCE_PAGE_ID: ${{ secrets.NOTION_SOURCE_PAGE_ID }}
+          NOTION_TARGET_PAGE_ID: ${{ secrets.NOTION_TARGET_PAGE_ID }}
+          TARGET_SECTION_TITLE: ${{ secrets.TARGET_SECTION_TITLE || 'WorkNote(Short-term)' }}
+          MY_NAME: ${{ secrets.MY_NAME }}
+          MY_ROLE: ${{ secrets.MY_ROLE || '마케터' }}
+          EXTRACT_MODE: ${{ secrets.EXTRACT_MODE || 'code' }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER || 'gemini' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TIMEZONE: 'Asia/Seoul'
+        run: |
+          python main.py
