@@ -297,28 +297,31 @@ class NotionService:
             "table": {
                 "table_width": 1,
                 "has_column_header": True,
-                "has_row_header": False
-            },
-            "children": [
-                {
-                    "type": "table_row",
-                    "table_row": {
-                        "cells": [
-                            [
-                                {
-                                    "type": "text",
-                                    "text": {"content": table_title},
-                                    "annotations": {"bold": True}
-                                }
+                "has_row_header": False,
+                "children": [
+                    {
+                        "type": "table_row",
+                        "table_row": {
+                            "cells": [
+                                [
+                                    {
+                                        "type": "text",
+                                        "text": {"content": table_title},
+                                        "annotations": {"bold": True}
+                                    }
+                                ]
                             ]
-                        ]
+                        }
                     }
-                }
-            ]
+                ]
+            }
         }
 
-        # section_block_id가 있으면 그 자식 또는 페이지 하단에 추가
-        created_block = self._post(f"blocks/{target_page_id}/children", {"children": [new_table_block]})
+        payload: Dict[str, Any] = {"children": [new_table_block]}
+        if section_block_id:
+            payload["after"] = section_block_id
+
+        created_block = self._patch(f"blocks/{target_page_id}/children", payload)
         results = created_block.get("results", [])
         if results:
             new_table_id = results[0]["id"]
@@ -362,7 +365,7 @@ class NotionService:
                     }
                 })
 
-            self._post(f"blocks/{table_id}/children", {"children": children_rows})
+            self._patch(f"blocks/{table_id}/children", {"children": children_rows})
             total_added += len(children_rows)
 
         logger.info(f"총 {total_added}개의 할 일 행이 테이블에 성공적으로 추가되었습니다.")
