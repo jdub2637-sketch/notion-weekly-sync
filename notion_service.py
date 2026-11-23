@@ -1,3 +1,4 @@
+import time
 import requests
 import logging
 from typing import List, Dict, Any, Optional, Tuple
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 class NotionService:
     NOTION_API_BASE = "https://api.notion.com/v1"
     NOTION_VERSION = "2022-06-28"
+    MIN_REQUEST_INTERVAL = 0.35  # Notion API 권장 속도 제한 (초당 약 3회)
+    MAX_RETRIES = 5
 
     def __init__(self, token: str):
         self.token = token
@@ -23,30 +26,60 @@ class NotionService:
             "Notion-Version": self.NOTION_VERSION,
             "Content-Type": "application/json"
         }
+        self._last_request_time = 0.0
+
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, Any]] = None,
+        json_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        url = f"{self.NOTION_API_BASE}/{endpoint.lstrip('/')}"
+
+        for attempt in range(self.MAX_RETRIES + 1):
+            elapsed = time.monotonic() - self._last_request_time
+            if elapsed < self.MIN_REQUEST_INTERVAL:
+                time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
+
+            self._last_request_time = time.monotonic()
+            resp = requests.request(
+                method,
+                url,
+                headers=self.headers,
+                params=params,
+                json=json_data,
+                timeout=30,
+            )
+
+            if resp.status_code == 429 and attempt < self.MAX_RETRIES:
+                retry_after = resp.headers.get("Retry-After")
+                if not retry_after:
+                    try:
+                        retry_after = resp.json().get("additional_data", {}).get("retry_after")
+                    except Exception:
+                        retry_after = None
+                wait_sec = float(retry_after) + 1.0 if retry_after else 5.0
+                logger.warning(f"⏳ Notion API 요청 제한(429) 도달 - {wait_sec:.0f}초 대기 후 재시도 ({attempt + 1}/{self.MAX_RETRIES})...")
+                time.sleep(wait_sec)
+                continue
+
+            if not resp.ok:
+                logger.error(f"Notion {method} {endpoint} 실패 ({resp.status_code}): {resp.text}")
+                resp.raise_for_status()
+            return resp.json()
+
+        resp.raise_for_status()
+        return {}
 
     def _get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        url = f"{self.NOTION_API_BASE}/{endpoint.lstrip('/')}"
-        resp = requests.get(url, headers=self.headers, params=params)
-        if not resp.ok:
-            logger.error(f"Notion GET {endpoint} 실패 ({resp.status_code}): {resp.text}")
-            resp.raise_for_status()
-        return resp.json()
+        return self._request("GET", endpoint, params=params)
 
     def _post(self, endpoint: str, json_data: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"{self.NOTION_API_BASE}/{endpoint.lstrip('/')}"
-        resp = requests.post(url, headers=self.headers, json=json_data)
-        if not resp.ok:
-            logger.error(f"Notion POST {endpoint} 실패 ({resp.status_code}): {resp.text}")
-            resp.raise_for_status()
-        return resp.json()
+        return self._request("POST", endpoint, json_data=json_data)
 
     def _patch(self, endpoint: str, json_data: Dict[str, Any]) -> Dict[str, Any]:
-        url = f"{self.NOTION_API_BASE}/{endpoint.lstrip('/')}"
-        resp = requests.patch(url, headers=self.headers, json=json_data)
-        if not resp.ok:
-            logger.error(f"Notion PATCH {endpoint} 실패 ({resp.status_code}): {resp.text}")
-            resp.raise_for_status()
-        return resp.json()
+        return self._request("PATCH", endpoint, json_data=json_data)
 
     def get_block_children(self, block_id: str) -> List[Dict[str, Any]]:
         """블록의 모든 자식 블록을 페이징 처리하여 가져옵니다."""
