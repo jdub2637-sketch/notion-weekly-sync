@@ -15,8 +15,6 @@ from config import (
     TIMEZONE
 )
 from notion_service import NotionService
-from ai_service import AIService
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
