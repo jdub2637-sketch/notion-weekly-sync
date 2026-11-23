@@ -15,6 +15,7 @@ from config import (
     TIMEZONE
 )
 from notion_service import NotionService
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -67,6 +68,7 @@ def run_weekly_sync():
         logger.info(f"회의록 텍스트 조회 성공 ({len(notes)} 글자)\n--- 내용 미리보기 ---\n{notes[:preview_len]}...\n---------------------")
 
         logger.info(f"2단계: AI({AI_PROVIDER})를 활용하여 '{MY_NAME or '나'}'의 이번 주 할 일 추출 중...")
+        from ai_service import AIService
         ai = AIService(
             provider=AI_PROVIDER,
             gemini_api_key=GEMINI_API_KEY,
@@ -97,4 +99,22 @@ def run_weekly_sync():
     logger.info("==========================================")
 
 if __name__ == "__main__":
-    run_weekly_sync()
+    import requests
+    try:
+        run_weekly_sync()
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        detail = e.response.text if e.response is not None else str(e)
+        logger.error("==========================================")
+        logger.error(f"❌ Notion API 오류 (HTTP {status})")
+        if status == 401:
+            logger.error("👉 NOTION_TOKEN이 잘못되었습니다. 토큰 전체(ntn_ 또는 secret_ 포함)를 공백 없이 다시 등록해 주세요.")
+        elif status in (403, 404):
+            logger.error("👉 페이지를 찾을 수 없거나 권한이 없습니다.")
+            logger.error("   1) 두 노션 페이지 모두 우측 상단 ··· → 연결(Connections) → 내 통합을 추가했는지 확인")
+            logger.error("   2) NOTION_SOURCE_PAGE_ID / NOTION_TARGET_PAGE_ID에 '페이지' 링크를 넣었는지 확인")
+        elif status == 400:
+            logger.error("👉 요청 형식 오류입니다. 아래 상세 메시지를 확인해 주세요.")
+        logger.error(f"상세: {detail}")
+        logger.error("==========================================")
+        sys.exit(1)

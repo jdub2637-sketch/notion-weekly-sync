@@ -63,6 +63,22 @@ class NotionService:
             cursor = data.get("next_cursor")
         return blocks
 
+    # API로 하위 내용을 읽을 수 없거나 읽을 필요가 없는 블록 타입
+    SKIP_CHILDREN_TYPES = {"unsupported", "child_database", "link_to_page", "ai_block", "transcription", "meeting_notes"}
+
+    def safe_get_child_blocks(self, block: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        하위 블록 조회 중 오류(예: 노션 AI 회의록 블록 등 API 미지원 블록)가 나도
+        전체 작업이 멈추지 않도록 경고만 남기고 건너뜁니다.
+        """
+        if block.get("type") in self.SKIP_CHILDREN_TYPES:
+            return []
+        try:
+            return self.get_block_children(block["id"])
+        except requests.HTTPError as e:
+            logger.warning(f"하위 블록({block.get('type')}) 조회를 건너뜁니다: {e}")
+            return []
+
     def extract_plain_text(self, rich_text_list: List[Dict[str, Any]]) -> str:
         """rich_text 배열에서 평문 문자열 추출"""
         if not rich_text_list:
@@ -99,9 +115,11 @@ class NotionService:
         else:
             return f"{indent}{content}"
 
-    def extract_full_text_recursive(self, block_id: str, depth: int = 0, max_depth: int = 3) -> str:
+    def extract_full_text_recursive(self, block_id: str, depth: int = 0, max_depth: int = 3,
+                                    blocks: Optional[List[Dict[str, Any]]] = None) -> str:
         """하위 블록(토글 등)까지 재귀적으로 탐색하여 전체 회의록 텍스트 추출"""
-        blocks = self.get_block_children(block_id)
+        if blocks is None:
+            blocks = self.get_block_children(block_id)
         lines = []
 
         for block in blocks:
@@ -110,10 +128,12 @@ class NotionService:
                 lines.append(text)
 
             # 토글이나 하위 목록 등 자식 블록이 있는 경우 재귀 탐색
-            if block.get("has_children") and depth < max_depth:
-                child_text = self.extract_full_text_recursive(block["id"], depth + 1, max_depth)
-                if child_text.strip():
-                    lines.append(child_text)
+            if block.get("has_children") and depth < max_depth and block.get("type") != "child_page":
+                children = self.safe_get_child_blocks(block)
+                if children:
+                    child_text = self.extract_full_text_recursive(block["id"], depth + 1, max_depth, blocks=children)
+                    if child_text.strip():
+                        lines.append(child_text)
 
         return "\n".join(lines)
 
